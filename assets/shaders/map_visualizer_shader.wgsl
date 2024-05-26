@@ -3,13 +3,11 @@
 @group(0) @binding(0)
 var texture: texture_storage_2d<rgba8unorm, read_write>;
 
-const CRAWLER_COUNT: u32 = 1000;
+const CRAWLER_COUNT: u32 = 1300;
 const FRAME_SIZE: u32 = 10;
 
 struct Crawler {
-    id: u32,
     start_pos: vec2<u32>,
-    pixel_radius: u32,
     current_radius: u32,
     pixel_color: vec4<f32>,
     map_id: u32

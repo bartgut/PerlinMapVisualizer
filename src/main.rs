@@ -5,6 +5,7 @@ use bevy::time::TimerMode;
 use bevy::ecs::schedule::OnEnter;
 use bevy::app::{App, Startup};
 use bevy::DefaultPlugins;
+use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::math::{vec2, Vec3};
 use bevy::prelude::{Asset, AssetServer, Commands, Component, Image, in_state, IntoSystemConfigs, NextState, Query, Res, ResMut, Resource, States, Timer, TypePath, Update, UVec2};
 use bevy::reflect::Map;
@@ -23,15 +24,14 @@ use rand::Rng;
 
 const PERLIN_NOISE_CONST: f32 = 0.002;
 const IMAGE_WIDTH: u32 = 1104;
-const IMAGE_HEIGHT: u32 = 874;
-const TIMER_PACE: f32 = 0.0001;
-const RADIUS_UPDATE: u32 = 1;
-const CRAWLERS_COUNT: usize = 1000;
+const IMAGE_HEIGHT: u32 = 872;
+const TIMER_PACE: f32 = 0.016;
+const RADIUS_UPDATE: u32 = 2;
+const CRAWLERS_COUNT: usize = 1300;
 const PLAIN_LONDON_MAP_NAME: &str = "london_yellow.jpg";
 const TRAFFIC_LONDON_MAP_NAME: &str = "london_t.jpg";
-
-const PLAIN_MOSCOW_MAP_NAME: &str = "island_p.jpg";
-const TRAFFIC_MOSCOW_MAP_NAME: &str = "island_t.jpg";
+const PLAIN_ISLAND_MAP_NAME: &str = "island_p.jpg";
+const TRAFFIC_ISLAND_MAP_NAME: &str = "island_t.jpg";
 #[derive(Resource)]
 struct FrameCounter {
     count: u32,
@@ -47,11 +47,19 @@ enum AppState {
     Running
 }
 
-#[derive(Component, ShaderType, Clone, Copy, Debug)]
+#[derive(Component, Debug)]
 struct Crawler {
     id: u32,
     start_pos: UVec2,
     pixel_radius: u32,
+    current_radius: u32,
+    pixel_color: Vec4,
+    map_id: u32
+}
+
+#[derive(Component, ShaderType, Clone, Copy, Debug)]
+struct CrawlerGPU {
+    start_pos: UVec2,
     current_radius: u32,
     pixel_color: Vec4,
     map_id: u32
@@ -70,8 +78,18 @@ impl Default for Crawler {
     }
 }
 
-impl Crawler {
+impl Default for CrawlerGPU {
+    fn default() -> Self {
+        Self {
+            start_pos:  UVec2::new(700, 500),
+            current_radius: 0,
+            pixel_color: Vec4::new(1.0, 1.0, 1.0, 1.0),
+            map_id: 0
+        }
+    }
+}
 
+impl Crawler {
     fn create_as_swarm_part(element_id: u32, frame_counter: u32, pixel_color: Vec4, map_id: u32) -> Self {
         Self {
             id: element_id,
@@ -79,9 +97,16 @@ impl Crawler {
             pixel_radius: 2,
             current_radius: 0,
             pixel_color,
-            map_id: map_id
+            map_id
         }
-
+    }
+    fn to_gpu(&self) -> CrawlerGPU {
+        CrawlerGPU {
+            start_pos: self.start_pos,
+            current_radius: self.current_radius,
+            pixel_color: self.pixel_color,
+            map_id: self.map_id
+        }
     }
 }
 
@@ -105,7 +130,9 @@ fn main() {
             DefaultPlugins,
             PixelBufferPlugin,
             ComputeShaderPlugin::<MapVisualizerShader>::default(),
-            NoisyShaderPlugin
+            NoisyShaderPlugin,
+            FrameTimeDiagnosticsPlugin::default(),
+            LogDiagnosticsPlugin::default()
         ))
         .insert_resource(FrameCounter { count: 1 })
         .init_state::<AppState>()
@@ -127,7 +154,7 @@ fn spawn_crawlers(mut commands: Commands, frame_counter: Res<FrameCounter>) {
             let color = Vec4::new(1.0, 0.0, 0.0, 1.0);
             commands.spawn(Crawler::create_as_swarm_part(i.try_into().unwrap(), frame_counter.count, color, 1));
         } else {
-            let color = Vec4::new(1.0,1.0,1.0,1.0);
+            let color = Vec4::new(1.0,1.0,1.0,0.6);
             commands.spawn(Crawler::create_as_swarm_part(i.try_into().unwrap(), frame_counter.count, color, 0));
         }
     }
@@ -186,8 +213,8 @@ fn image_preload(
         s.is_srgb = false
     };
 
-    let map_plain: Handle<Image> = asset_server.load_with_settings(PLAIN_MOSCOW_MAP_NAME, settings);
-    let map_traffic: Handle<Image> = asset_server.load_with_settings(TRAFFIC_MOSCOW_MAP_NAME, settings);
+    let map_plain: Handle<Image> = asset_server.load_with_settings(PLAIN_ISLAND_MAP_NAME, settings);
+    let map_traffic: Handle<Image> = asset_server.load_with_settings(TRAFFIC_ISLAND_MAP_NAME, settings);
     commands.insert_resource(Maps {
         plain: map_plain,
         traffic: map_traffic,
@@ -272,7 +299,7 @@ fn param_update(
 ) {
     let params = &mut cs.get_mut(query.single_mut()).unwrap().params;
     for (i, crawler) in crawlers_query.iter().enumerate() {
-        params.crawlers[i] = crawler.clone();
+        params.crawlers[i] = crawler.to_gpu();
     }
 }
 
@@ -289,13 +316,13 @@ struct MapVisualizerShader {
 
 #[derive(ShaderType, Clone, Debug)]
 struct Params {
-    crawlers: [Crawler; CRAWLERS_COUNT]
+    crawlers: [CrawlerGPU; CRAWLERS_COUNT]
 }
 
 impl Default for Params {
     fn default() -> Self {
         Params {
-            crawlers: [Crawler::default(); CRAWLERS_COUNT]
+            crawlers: [CrawlerGPU::default(); CRAWLERS_COUNT]
         }
     }
 }
